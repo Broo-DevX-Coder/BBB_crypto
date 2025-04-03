@@ -29,6 +29,7 @@ def binance_crypto(): # ===> To compare the piars of binance
             new_pairs = binance.get_usdt_pairs()
             old_pairs = get_symboles(g="binance",db=db)
             compare_pairs = new_pairs - old_pairs
+            print("bitget")
             if compare_pairs:
                 print(f"new pair detected{compare_pairs}")
                 for f in compare_pairs:
@@ -50,6 +51,7 @@ def bitget_crypto(): # ===> To compare the piars of bitget
             new_pairs = bitget.get_all_trading_pairs()
             old_pairs = get_symboles(g="bitget",db=db)
             compare_pairs = new_pairs - old_pairs
+            print("bitget")
             if compare_pairs:
                 print(f"new pair detected{compare_pairs}")
                 for f in compare_pairs:
