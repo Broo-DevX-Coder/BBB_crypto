@@ -13,3 +13,8 @@ Password = str(os.getenv("Bitget_Password"))
 # ================"
 """
 import sqlite3
+db = sqlite3.connect("Crypto.db")
+cursor = db.cursor()
+cursor.execute('DELETE FROM new')
+db.commit()
+db.close()
