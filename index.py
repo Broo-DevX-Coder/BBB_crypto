@@ -70,7 +70,8 @@ class BitgetApp(App):
             socket.setdefaulttimeout(timeout)
             socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
             return True
-        except socket.error:
+        except socket.error: 
+            
             return False
 
     def start_bitget_loop(self):
