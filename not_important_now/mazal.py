@@ -16,5 +16,6 @@ import sqlite3
 db = sqlite3.connect("Crypto.db")
 cursor = db.cursor()
 cursor.execute('DELETE FROM new')
+cursor.execute('DELETE FROM bitget ')
 db.commit()
 db.close()

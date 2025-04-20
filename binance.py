@@ -51,7 +51,6 @@ def binance_crypto(): # ===> To compare the piars of binance
                     pair_info = get_pair_info(f)
                     cursor.execute("INSERT INTO binance (symbol,status,baseAsset,quoteAsset,addtime) VALUES (?,?,?,?,?)", (str(pair_info["symbol"]),str(pair_info["status"]),str(pair_info["baseAsset"]),str(pair_info["quoteAsset"]),str(datetime.now().timestamp())))
                     db.commit()
-                    get_pair.sand_TLG_msg("Binance",str(pair_info["symbol"]))
             time.sleep(2)
         except Exception as e:
             print(e)
