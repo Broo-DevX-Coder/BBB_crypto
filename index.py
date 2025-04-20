@@ -144,15 +144,3 @@ if __name__ == "__main__":
         print("Now bitget it work ========================================================================")
 
     BitgetApp().run()
-
-
-
-
-
-"""
-    if str(os.getenv("PLATFORM")) == "binance":
-        print("Now binance it work ========================================================================")
-        import binance
-        Binanse = Thread(target=binance.binance_crypto) # to start binanse
-        Binanse.start()
-"""
