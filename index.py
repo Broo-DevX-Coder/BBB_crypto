@@ -1,12 +1,9 @@
 import os
 from threading import Thread
-from flask import Flask,render_template
-from dotenv import load_dotenv
-from asgiref.wsgi import WsgiToAsgi
 from datetime import datetime
-import get_pair,uvicorn
-import sqlite3,time
-from datetime import datetime
+import get_pair
+import sqlite3, time
+import socket
 
 from kivy.app import App
 from kivy.uix.label import Label
@@ -17,7 +14,7 @@ from kivy.clock import Clock
 
 from bitget import *
 
-# عناصر الواجهة العامة
+# الواجهة
 class StatusWindow(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation='vertical', padding=10, spacing=10, **kwargs)
@@ -58,14 +55,35 @@ class StatusWindow(BoxLayout):
 class BitgetApp(App):
     def build(self):
         self.window = StatusWindow()
-        Thread(target=self.start_bitget_loop, daemon=True).start()
+
+        # تحقق من الاتصال في البداية
+        if not self.check_internet():
+            Clock.schedule_once(lambda dt: self.window.add_pair("There is not internet connection", "red"), 0)
+            Clock.schedule_once(lambda dt: self.stop(), 5)
+        else:
+            Thread(target=self.start_bitget_loop, daemon=True).start()
+
         return self.window
+
+    def check_internet(self, host="8.8.8.8", port=53, timeout=3):
+        try:
+            socket.setdefaulttimeout(timeout)
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+            return True
+        except socket.error:
+            return False
 
     def start_bitget_loop(self):
         db = sqlite3.connect("Crypto.db")
         cursor = db.cursor()
         while True:
             try:
+                # تحقق من الاتصال أثناء التشغيل
+                if not self.check_internet():
+                    Clock.schedule_once(lambda dt: self.window.add_pair("There is not internet connection", "red"), 0)
+                    Clock.schedule_once(lambda dt: self.stop(), 5)
+                    break  # أوقف اللوب بعد جدولة الإغلاق
+
                 time_start = datetime.now().timestamp()
                 new_pairs = get_all_trading_pairs()
                 old_pairs = get_pair.get_symboles(g="bitget", db=db)
@@ -98,6 +116,7 @@ class BitgetApp(App):
 
                 Clock.schedule_once(lambda dt: self.window.update_speed(f"{request_in:.2f}S", "green" if request_in <= 1 else "orange"), 0)
                 Clock.schedule_once(lambda dt: self.window.update_status("Success", "green"), 0)
+                time.sleep(0.5)
 
             except Exception as e:
                 Clock.schedule_once(lambda dt: self.window.update_status("error", "red"), 0)
@@ -106,41 +125,6 @@ class BitgetApp(App):
                 time.sleep(10)
 
 
-# main ===================================================================================================
-load_dotenv("./.env")
-flask_app = Flask(__name__)
-
-# flask functions ===================================================================================================
-def flask_start():
-    asgi_app = WsgiToAsgi(flask_app)
-    uvicorn.run(asgi_app,host="127.0.0.1",port=int(os.getenv("PORT",5000)))
-
-@flask_app.route("/viewer",methods=["GET","HEAD"])
-def viewer():
-    return "hellow viewer",200
-
-@flask_app.route("/",methods=["GET","HEAD"])
-def front():
-    db = sqlite3.connect("Crypto.db")
-    cursor = db.cursor()
-    cursor.execute("SELECT * FROM new")
-    new = cursor.fetchall()
-    db.close()
-
-    return render_template("index.html",pairs=new)
-
-@flask_app.template_filter("localtime")
-def to_localtime(ts,strtime="%H:%M:%S %d/%m/%Y"):
-    return datetime.fromtimestamp(float(ts)).strftime(str(strtime))
-
-
-
 if __name__ == "__main__":
-    
-    flask_thread = Thread(target=flask_start, daemon=True)
-    flask_thread.start()
-
-    if str(os.getenv("PLATFORM")) == "bitget":
-        print("Now bitget it work ========================================================================")
-
+    print("Now bitget it work ========================================================================")
     BitgetApp().run()
