@@ -69,9 +69,9 @@ def get_all_trading_pairs() -> list:
         print(f"Error: {response.status_code}")
         return []
 
-
+"""
 def get_usdt_pairs() -> list: 
-    """جلب فقط الأزواج التي يتم تداولها مقابل USDT"""
+    # جلب فقط الأزواج التي يتم تداولها مقابل USDT
     BINANCE_API_URL = "https://api.binance.com/api/v3/exchangeInfo"
     response = requests.get(BINANCE_API_URL)
     if response.status_code == 200:
@@ -83,15 +83,19 @@ def get_usdt_pairs() -> list:
     else:
         print("⚠️ خطأ في جلب البيانات من Binance")
         return []
+"""
 
 db = sqlite3.connect("Crypto.db")
 cursor = db.cursor()
 all_pairs = get_all_trading_pairs()
+
 for c in all_pairs:
     cursor.execute("INSERT INTO bitget (symbol,status,baseAsset,quoteAsset,addtime) VALUES (?,?,?,?,?)",(str(c["symbol"]),str(c["status"]),str(c["base_coin"]),str(c["quote_coin"]),str(datetime.datetime.now().timestamp())))
-    db.commit()
+
+db.commit()
 db.close()
 
+"""
 db = sqlite3.connect("Crypto.db")
 cursor = db.cursor()
 all_pairs = get_usdt_pairs()
@@ -99,3 +103,4 @@ for c in all_pairs:
     cursor.execute("INSERT INTO binance (symbol,status,baseAsset,quoteAsset,addtime) VALUES (?,?,?,?,?)",(str(c["symbol"]),str(c["status"]),str(c["baseAsset"]),str(c["quoteAsset"]),str(datetime.datetime.now().timestamp())))
     db.commit()
 db.close()
+"""
