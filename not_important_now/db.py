@@ -89,9 +89,9 @@ cursor = db.cursor()
 all_pairs = get_all_trading_pairs()
 for c in all_pairs:
     cursor.execute("INSERT INTO bitget (symbol,status,baseAsset,quoteAsset,addtime) VALUES (?,?,?,?,?)",(str(c["symbol"]),str(c["status"]),str(c["base_coin"]),str(c["quote_coin"]),str(datetime.datetime.now().timestamp())))
-    db.commit()
+db.commit()
 db.close()
-
+"""
 db = sqlite3.connect("Crypto.db")
 cursor = db.cursor()
 all_pairs = get_usdt_pairs()
@@ -99,3 +99,4 @@ for c in all_pairs:
     cursor.execute("INSERT INTO binance (symbol,status,baseAsset,quoteAsset,addtime) VALUES (?,?,?,?,?)",(str(c["symbol"]),str(c["status"]),str(c["baseAsset"]),str(c["quoteAsset"]),str(datetime.datetime.now().timestamp())))
     db.commit()
 db.close()
+"""
