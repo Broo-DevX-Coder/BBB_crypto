@@ -6,7 +6,6 @@ from multiprocessing import Process
 from datetime import datetime
 import sqlite3,time
 import requests
-from multiprocessing import Process
 import tkinter as tk
 
 class BitgetData:
