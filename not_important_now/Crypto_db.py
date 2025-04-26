@@ -1,9 +1,12 @@
 import sqlite3
 import requests
 import datetime
+import os
 
 # الاتصال بقاعدة البيانات (أو إنشائها إذا لم تكن موجودة)
-conn = sqlite3.connect('Crypto.db')
+BASE_DIR = os.path.dirname(__file__)
+
+conn = sqlite3.connect(os.path.join(BASE_DIR,'..','Local.db'))
 cursor = conn.cursor()
 
 # إنشاء جدول 'new'
@@ -69,23 +72,7 @@ def get_all_trading_pairs() -> list:
         print(f"Error: {response.status_code}")
         return []
 
-"""
-def get_usdt_pairs() -> list: 
-    # جلب فقط الأزواج التي يتم تداولها مقابل USDT
-    BINANCE_API_URL = "https://api.binance.com/api/v3/exchangeInfo"
-    response = requests.get(BINANCE_API_URL)
-    if response.status_code == 200:
-        data = response.json()
-
-        usdt_pairs = [symbol for symbol in data['symbols'] if symbol['symbol'].endswith("USDT")]
-    
-        return usdt_pairs
-    else:
-        print("⚠️ خطأ في جلب البيانات من Binance")
-        return []
-"""
-
-db = sqlite3.connect("Crypto.db")
+db = sqlite3.connect("Local.db")
 cursor = db.cursor()
 all_pairs = get_all_trading_pairs()
 
@@ -94,13 +81,3 @@ for c in all_pairs:
 
 db.commit()
 db.close()
-
-"""
-db = sqlite3.connect("Crypto.db")
-cursor = db.cursor()
-all_pairs = get_usdt_pairs()
-for c in all_pairs:
-    cursor.execute("INSERT INTO binance (symbol,status,baseAsset,quoteAsset,addtime) VALUES (?,?,?,?,?)",(str(c["symbol"]),str(c["status"]),str(c["baseAsset"]),str(c["quoteAsset"]),str(datetime.datetime.now().timestamp())))
-    db.commit()
-db.close()
-"""
