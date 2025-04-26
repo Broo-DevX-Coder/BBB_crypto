@@ -1,14 +1,17 @@
-import os
-import subprocess, sys
+import os, subprocess, sys, sqlite3, time, requests, httpx
 from threading import Thread
-from dotenv import load_dotenv
-from multiprocessing import Process
 from datetime import datetime
-import sqlite3, time
-import requests
 from rich.console import Console
-from rich.status import Status
 
+# Configuration
+BASE_DIR = os.path.dirname(__file__)
+PSQLDB = os.path.join(BASE_DIR, "PSQL.db")
+TELEGRAM_BOT_TOKEN = "7900942260:AAHjdiCRobHwbkUj0PEMfcOqTHTvniMK_ck"
+TELEGRAM_account_CHAT_ID = 7634771616
+console = Console()
+
+# ===================================================================
+# Class to fetch data from Bitget ===================================
 class BitgetData:
     headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -26,11 +29,9 @@ class BitgetData:
                 self._cached_symbol_data = data.get('data', [])
                 return self._cached_symbol_data, None, None
             else:
-                self._cached_symbol_data = []
-                return self._cached_symbol_data, "response_code", str(response.status_code)
+                return [], "response_code", str(response.status_code)
         except requests.RequestException as e:
-            self._cached_symbol_data = []
-            return self._cached_symbol_data, "request_code", str(e)
+            return [], "request_code", str(e)
 
     def get_all_trading_pairs(self):
         trading_pairs, error_type, error_info = self.fetch_symbol_data()
@@ -59,18 +60,32 @@ class BitgetData:
         return set([pair[1] for pair in cursor.fetchall()])
 
 
+# ===================================================================
+# Main Bot Console Version ==========================================
 class PlatformBot:
     API = ""
     SECREAT = ""
-    accont = ""
+    account = ""
     platform = ""
     platform_data = None
-    DB = "Crypto.db"
+    DB_NAME = ""
 
     def __init__(self):
-        self.BASE_DIR = os.path.dirname(__file__)
-        self.DB_DIR = os.path.join(self.BASE_DIR, self.DB)
-        self.console = Console()
+        self.DB_DIR = os.path.join(BASE_DIR, self.DB_NAME)
+        self.first_time_run = True
+
+    def insert_log(self, msg, log_type, color="cyan"):
+        console.log(f"[{color}][{log_type}: {datetime.now().strftime('%m/%d %H:%M:%S')}]{msg}")
+
+    def insert_status(self, msg, log_type):
+        text = f"[{log_type}] {msg}"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        params = {"chat_id": TELEGRAM_account_CHAT_ID, "text": text}
+        try:
+            with httpx.Client() as client:
+                client.get(url=url, params=params)
+        except:
+            pass
 
     def restart_script(self, r: int = 5):
         self.insert_log(f"Restarting after {r} seconds", "SYSTEM", "orange")
@@ -78,7 +93,7 @@ class PlatformBot:
         subprocess.Popen([sys.executable] + sys.argv)
         sys.exit()
 
-    def compire_data(self, db):
+    def compare_data(self, db):
         new_pairs, error_type, error_info = self.platform_data.get_all_trading_pairs()
         old_pairs = self.platform_data.get_symboles("bitget", db=db)
 
@@ -87,55 +102,65 @@ class PlatformBot:
         else:
             self.insert_log(f"TYPE: {error_type}", "ERROR", "red")
             self.insert_log(f"INFO: {error_info}", "ERROR", "red")
+            error_text = f"There is an error: `{error_type}` with info `{error_info}` in `compare_data`"
+            Thread(target=self.insert_status, args=(error_text, "ERROR")).start()
             self.restart_script()
 
-    def add_piars(self, cursor, f):
-        pair_info, error_type, error_info = self.platform_data.get_pair_info(f)
+    def add_pairs(self, cursor, symbol):
+        pair_info, error_type, error_info = self.platform_data.get_pair_info(symbol)
         if error_type is not None:
             self.insert_log(f"TYPE: {error_type}", "ERROR", "red")
             self.insert_log(f"INFO: {error_info}", "ERROR", "red")
+            error_text = f"There is an error: `{error_type}` with info `{error_info}` in `add_pairs`"
+            Thread(target=self.insert_status, args=(error_text, "ERROR")).start()
             self.restart_script()
         else:
-            cursor.execute("INSERT INTO new (symbol, platform, time) VALUES (?, ?, ?)", 
-                           (str(f), "bitget", str(datetime.now().timestamp())))
-            cursor.execute("INSERT INTO bitget (symbol, status, baseAsset, quoteAsset, addtime) VALUES (?, ?, ?, ?, ?)", 
-                           (pair_info["symbol"], pair_info["status"], pair_info["baseCoin"], pair_info["quoteCoin"], str(datetime.now().timestamp())))
-            self.insert_log(f"🆕 Added {f}", "NOTIFICATION", "green")
+            cursor.execute("INSERT INTO new (symbol, platform, time) VALUES (?, ?, ?)",
+                           (str(symbol), "bitget", str(datetime.now().timestamp())))
+            cursor.execute("INSERT INTO bitget (symbol, status, baseAsset, quoteAsset, addtime) VALUES (?, ?, ?, ?, ?)",
+                           (pair_info["symbol"], pair_info["status"], pair_info["baseCoin"],
+                            pair_info["quoteCoin"], str(datetime.now().timestamp())))
+            self.insert_log(f"🆕 Added {symbol}", "NOTIFICATION", "green")
 
-    def insert_log(self,msg,log_type,color="cyan"):
-        self.console.log(f"[{color}][{log_type}: {datetime.now().strftime("%d/%M/%Y %H:%m:%S")}]{msg}")
+    def buy_and_sell_pair(self, symbol):
+        pass  # Placeholder
 
     def platform_crypto(self):
         time.sleep(1)
-        self.insert_log(f"Start the bot", "SYSTEM", "bold cyan")
-        self.insert_log(f"Chosen Platform > {self.platform}", "SYSTEM", "bold blue")
-        self.insert_log(f"Account working > {self.accont}", "SYSTEM", "bold blue")
-
-        
+        self.insert_log("Start the bot", "SYSTEM")
+        self.insert_log(f"Selected Platform: {self.platform}", "USER", "#7AE2CF")
+        self.insert_log(f"Account in use: {self.account}", "USER", "#3A59D1")
 
         db = sqlite3.connect(self.DB_DIR)
         cursor = db.cursor()
 
-        with self.console.status("[bold yellow]Fetching trading pairs...") as status:
+        with console.status("[bold yellow]Running...") as status:
             while True:
                 try:
                     time_start = datetime.now().timestamp()
-                    compare_pairs = self.compire_data(db)
+                    compare_pairs = self.compare_data(db)
                     request_in = datetime.now().timestamp() - time_start
 
                     if compare_pairs:
                         new_pair = list(compare_pairs)[0]
-                        self.insert_log(f"🆕 Detected {new_pair}", "NOTIFICATION", "green")
-                        self.add_piars(cursor, new_pair)
+                        self.insert_log(f"🆕 Detected {new_pair}", "NOTIFICATION", "blue")
+
+                        if not self.first_time_run:
+                            self.buy_and_sell_pair(new_pair)
+                        else:
+                            self.first_time_run = False
+
+                        text = f"🆕 Detected `{new_pair}`"
+                        Thread(target=self.insert_status, args=(text, "NOTIFICATION")).start()
+                        Thread(target=self.add_pairs, args=(cursor, new_pair)).start()
                         db.commit()
 
-
-                    status.update(f"[green]Request completed in {request_in:.4f}s | Status: Success")
-
-
+                    status.update(f"[green]Request in: {request_in:.4f}s | Status: Success")
                 except Exception as e:
                     status.update("[bold red]❌ Error occurred!")
-                    self.insert_log(f"{e}", "ERROR", "red")
+                    self.insert_log(f"Error> {e}", "ERROR", "red")
+                    text = f"There is an error: `{e}` in `main loop`"
+                    Thread(target=self.insert_status, args=(text, "NOTIFICATION")).start()
                     self.restart_script()
 
     def run(self):
@@ -144,17 +169,14 @@ class PlatformBot:
         local.join()
 
 
+# ===================================================================
+# Local bot configuration
 class LocalBot(PlatformBot):
-    accont = "Local"
+    account = "Local"
     platform = "Bitget"
     platform_data = BitgetData()
+    DB_NAME = "Local.db"
 
-
-    def restart_script(self, r: int = 5):
-        self.insert_log(f"Restarting after {r} seconds", "SYSTEM", "orange")
-        time.sleep(r)
-        sys.exit()
 
 if __name__ == "__main__":
-
     LocalBot().run()

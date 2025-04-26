@@ -1,4 +1,4 @@
-import sqlite3
+import sqlite3,os
 import requests
 from datetime import datetime
 
@@ -7,8 +7,9 @@ headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
 
-# فتح أو إنشاء قاعدة البيانات
-db = sqlite3.connect("Crypto.db")
+BASE_DIR = os.path.dirname(__file__)
+
+db = sqlite3.connect(os.path.join(BASE_DIR,'..','Local.db'))
 cursor = db.cursor()
 
 # جلب بيانات الأزواج من Bitget
