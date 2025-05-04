@@ -1,31 +1,46 @@
 # ===================================================================
-import os, subprocess, sys, requests, sqlite3, time, httpx
+import os, subprocess, sys, requests, sqlite3, time ,hmac, hashlib, base64, json, httpx, math
 from threading import Thread
 from dotenv import load_dotenv
 from datetime import datetime
 import tkinter as tk
+from requests.adapters import HTTPAdapter
 
 # Configuration and Paths ============================================
 BASE_DIR = os.path.dirname(__file__)
-PSQLDB = os.path.join(BASE_DIR, "PSQL.db")
 TELEGRAM_BOT_TOKEN = "7900942260:AAHjdiCRobHwbkUj0PEMfcOqTHTvniMK_ck"
 TELEGRAM_account_CHAT_ID = 7634771616
+
+# Get .env file =====================================================
+load_dotenv(os.path.join(BASE_DIR,".env"))
 
 # ===================================================================
 # Class to fetch data from Bitget ===================================
 class BitgetData:
     headers = {'User-Agent': 'Mozilla/5.0'}
+    adapters = ["https://api.bitget.com/api/"]
+    API_SECRET = ""
+    API_KEY = ""
+    PASSPHRASE = ""
+    API = ""
 
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+        ada = HTTPAdapter(pool_connections=100,pool_maxsize=100)
+        for i in self.adapters:
+            self.session.mount(i,ada)
+
         self._cached_symbol_data = None
+    
+    # ==============================================
+    # All this just to get * pairs and new pairs ===
 
     def fetch_symbol_data(self):
         # Request all available trading pairs
         url = 'https://api.bitget.com/api/v2/spot/public/symbols'
         try:
-            response = self.session.get(url, headers=self.headers)
+            response = self.session.get(url, timeout=2)
             if response.status_code == 200:
                 data = response.json()
                 self._cached_symbol_data = data.get('data', [])
@@ -35,20 +50,21 @@ class BitgetData:
         except requests.RequestException as e:
             return [], "request_code", str(e)
 
+    # get all trading pairs from SQLite ============
     def get_all_trading_pairs(self):
-        # Get all USDT trading pairs that are online
+        # Get all USDT trading pairs that are online ===============
         trading_pairs, error_type, error_info = self.fetch_symbol_data()
         pairs_info = [
             pair['symbol']
             for pair in trading_pairs if pair['status'] == 'online' and pair['quoteCoin'] == "USDT"
         ]
         return set(pairs_info), error_type, error_info
-
+    
+    # Get full information for a specific trading pair ==============
     def get_pair_info(self, symbol: str):
-        # Get full information for a specific trading pair
         url = f'https://api.bitget.com/api/v2/spot/public/symbols?symbol={symbol}'
         try:
-            response = self.session.get(url, headers=self.headers)
+            response = self.session.get(url, timeout=2)
             if response.status_code == 200:
                 data = response.json()
                 pairs = data.get('data', [])
@@ -63,20 +79,118 @@ class BitgetData:
         cursor = db.cursor()
         cursor.execute(f"SELECT * FROM {table_name}")
         return set([pair[1] for pair in cursor.fetchall()])
+    
+    # ===============================================
+    # But this to Buy/sell pairs ====================
+
+    # HMAC signature ==================
+    def generate_signature(self, timestamp, method, request_path, body=''):
+        prehash = f"{timestamp}{method}{request_path}{body}"
+        signature = hmac.new(
+        self.API_SECRET.encode('utf-8'),
+        prehash.encode('utf-8'),
+        hashlib.sha256
+        ).digest()
+        return base64.b64encode(signature).decode()
+    
+    # to place Buy/Sell orders ==========================
+    def place_order(self, symbol:str, side:str, amount:float, checkScale:int):
+        try:
+            url = "https://api.bitget.com/api/v2/spot/trade/place-order"
+            method = "POST"
+            timestamp = str(int(time.time() * 1000))
+            safe_amount = math.floor(amount * (10 ** checkScale)) / (10 ** checkScale)
+
+            body = {
+                    "symbol": symbol,      # مثل "BTCUSDT"
+                    "side": side,          # "buy" أو "sell"
+                    "orderType": "market",
+                    "size": str(safe_amount)
+                }
+
+            body_str = json.dumps(body)
+            sign = self.generate_signature(timestamp, method, "/api/v2/spot/trade/place-order", body_str)
+
+            headers = {
+                "Content-Type": "application/json",
+                "ACCESS-KEY": self.API_KEY,
+                "ACCESS-SIGN": sign,
+                "ACCESS-TIMESTAMP": timestamp,
+                "ACCESS-PASSPHRASE": self.PASSPHRASE
+            }
+
+            response = self.session.post(url, headers=headers, data=body_str,timeout=1)
+
+            if response.status_code == 200:
+                data = response.json()
+                # استخراج الكمية من رصيد الـ BTC أو أي زوج آخر
+                return data,None
+            else:
+                return None,response.text
+            
+        except requests.RequestException as e:
+            return None,str(e)
+        
+    # To get accont balanses ===========================
+    def get_balance(self):
+        try:
+            timestamp = str(int(time.time() * 1000))
+            method = "GET"
+            url = "https://api.bitget.com/api/v2/spot/account/assets"
+            sign = self.generate_signature(timestamp, method, "/api/v2/spot/account/assets")
+    
+    
+            response = self.session.get(url, headers={
+                "Content-Type": "application/json",
+                "ACCESS-KEY": self.API_KEY,
+                "ACCESS-SIGN": sign,
+                "ACCESS-TIMESTAMP": timestamp,
+                "ACCESS-PASSPHRASE": self.PASSPHRASE
+            })
+    
+            if response.status_code == 200:
+                data = response.json()
+                assests = {
+                    str(ass["coin"]):{
+                        "amount":str(ass["available"]),
+                        "frozen":str(ass["frozen"])
+                    } 
+                    for ass in data["data"] }
+                return assests,None
+            else:
+                return None,response.text
+        except requests.RequestException as e:
+            return None,str(e)
+        
+    # To get symbol's curent price ===================
+    def get_current_price(self,symbol):
+        try:
+            url = f"https://api.bitget.com/api/v2/spot/market/tickers?symbol={symbol}"
+            response = self.session.get(url)
+    
+            if response.status_code == 200:
+                data = response.json()
+                price = data['data'][0]["lastPr"] # السعر الحالي
+                return float(price),None
+            else:
+                return None,response.text
+        except requests.RequestException as e:
+            return None,str(e)
+
 
 # ===================================================================
 # Main Platform + GUI Controller ====================================
 class PlatformBot:
-    API = ""
-    SECREAT = ""
     account = ""
     platform = ""
-    platform_data = None
+    platform_data:BitgetData = None
     DB_NAME = ""
 
     def __init__(self):
         self.DB_DIR = os.path.join(BASE_DIR, self.DB_NAME)
         self.firt_time_run = True
+        self.cash_pairs = None
+        self.cash_pairs_ok = False
 
         # Create GUI window
         self.root = tk.Tk()
@@ -94,33 +208,41 @@ class PlatformBot:
         self.new_listbox = tk.Listbox(self.root, font=("Arial", 12), fg="green", height=10)
         self.new_listbox.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
+    # Restart the script after r seconds ============
     def restart_script(self, r: int = 5):
-        # Restart the script after r seconds
         self.insert_log(f"Restarting after {r}", "SYSTEM", "orange")
         time.sleep(r)
-        for i in self.apps:
-            i.close()
         subprocess.Popen([sys.executable] + sys.argv)
         os._exit(0)
 
+    # Insert message into the GUI log ================
     def insert_log(self, msg: str, log_type: str, color: str = "black"):
-        # Insert message into the GUI log
+        
         now = datetime.now().strftime("%m/%d %H:%M:%S")
         self.new_listbox.insert(0, f"[{log_type}: {now}] {msg}")
         self.new_listbox.itemconfig(0, {'fg': color})
 
+    # Send a Telegram message =============
     def insert_status(self, msg: str, log_type: str):
-        # Send a Telegram message
         text = f"[{log_type}] {msg}"
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         params = {"chat_id": TELEGRAM_account_CHAT_ID, "text": text}
-        with httpx.Client() as client:
-            client.get(url=url, params=params)
+        try:
+            with httpx.Client() as client:
+                client.get(url=url, params=params)
+        except:
+            pass
 
+    # Compare new fetched pairs with those in the database =================
     def compare_data(self, db):
-        # Compare new fetched pairs with those in the database
         new_pairs, error_type, error_info = self.platform_data.get_all_trading_pairs()
-        old_pairs = self.platform_data.get_symboles("bitget", db=db)
+
+        if self.cash_pairs_ok == False:
+            old_pairs = self.platform_data.get_symboles("bitget", db=db)
+            self.cash_pairs = old_pairs
+            self.cash_pairs_ok = True
+        else:
+            old_pairs = self.cash_pairs
 
         if error_type is None:
             return new_pairs - old_pairs
@@ -148,10 +270,59 @@ class PlatformBot:
                            (pair_info["symbol"], pair_info["status"], pair_info["baseCoin"],
                             pair_info["quoteCoin"], str(datetime.now().timestamp())))
             self.insert_log(f"🆕 Added {symbol}", "NOTIFICATION", "green")
+            self.cash_pairs_ok = False
 
-    def buy_and_sell_pair(self, symbol):
-        # Placeholder for Buy/Sell logic
-        pass
+    # That is the main =========================================
+    def buy_and_sell_pair(self, symbol:str):
+        __ = datetime.now().timestamp()
+        # Buy symbol =======================
+        data_buying,error_buying = self.platform_data.place_order(symbol,"buy",2,4)
+        buy__ = datetime.now().timestamp() - __
+        
+        # If byed =========================
+        if error_buying == None:
+            if data_buying['msg'] == "success":
+                # byed by seccess ===================
+                self.insert_log(f"Buyed {symbol} in : {round(buy__*1000 , 0)} ms" , "NOTIFICATION", "#030303")
+                time.sleep(4)
+
+                # get pairs ========================
+                pairs,error_pairs = self.platform_data.get_balance()
+
+                # if piars geted ===============
+                if error_pairs == None:
+                    wanted_assest = pairs.get(str(symbol.replace("USDT", "")))
+
+                    if wanted_assest:
+                        # get assest price ================
+                        pair_info, error_type, error_info = self.platform_data.get_pair_info(symbol)
+                        if error_type == None:
+                            data_selling,error_selling = self.platform_data.place_order(symbol,"sell",float(wanted_assest["amount"]),int(pair_info["quantityPrecision"]))
+                            if error_selling != None:
+                                self.insert_log(f"from selling system >> {error_selling}", "ERROR", "red")
+                                Thread(target=self.insert_status, args=(f"there is an error in selling system : `{error_selling}`", "ERROR")).start()
+                            else:
+                                self.insert_log(f"Selled {symbol} in : {round((datetime.now().timestamp() - __)*1000,0)} ms" , "NOTIFICATION", "#A5158C")
+                                pairs__,error_pairs__ = self.platform_data.get_balance()
+                                wanted_assest__ = pairs__.get("USDT")
+                                self.insert_log(f"your curent Balnce now is `{round(float(wanted_assest__["amount"]),2)}` USDT $$", "USERNOTIF", "#3D8D7A")
+                                Thread(target=self.insert_status, args=(f"your curent Balnce now is `{round(float(wanted_assest__["amount"]),2)}` USDT $$", "USERNOTIF")).start()
+                        else:
+                            self.insert_log(f"from get assest info [TYPE] >> {error_type}", "ERROR", "red")
+                            self.insert_log(f"from get assest info [INFO] >> {error_info}", "ERROR", "red")
+                            Thread(target=self.insert_status, args=(f"there is an error in get assest info [INFO]: `{error_info}`", "ERROR")).start()
+                    
+                else:
+                    self.insert_log(f"from get assestes system >> {error_pairs}", "ERROR", "red")
+                    Thread(target=self.insert_status, args=(f"there is an error in get assestes: `{error_pairs}`", "ERROR")).start()
+            else:
+                self.insert_log(f"from bitget in buying >>{data_buying['msg']}", "ERROR", "red")
+                Thread(target=self.insert_status, args=(f"there is an error from bitget in buying: `{data_buying['msg']}`", "ERROR")).start()
+
+        elif error_buying != None:
+            self.insert_log(f"from buying system >> {error_buying}", "ERROR", "red")
+            Thread(target=self.insert_status, args=(f"there is an error in buying system : `{error_buying}`", "ERROR")).start()
+
 
     def platform_crypto(self):
         # Main bot logic loop
@@ -168,20 +339,45 @@ class PlatformBot:
                 time_start = datetime.now().timestamp()
                 compare_pairs = self.compare_data(db)
                 request_in = datetime.now().timestamp() - time_start
+                if request_in > 1.5:
+                    self.firt_time_run = True
 
                 if compare_pairs:
-                    new_pair = list(compare_pairs)[0]
-                    self.insert_log(f"🆕 Detected {new_pair}", "NOTIFICATION", "blue")
+                    new_pairs = list(compare_pairs)
+                    new_pair = new_pairs[0]
+                    print(f"new {new_pairs}")
+
 
                     if not self.firt_time_run:
-                        self.buy_and_sell_pair(new_pair)
+                        # If ther is more than pair ==================================================
+                        # ============================================================================
+                        if len(new_pairs) > 1:
+                            self.buy_and_sell_pair(new_pair)
+                            text = f"🆕 Detected"
+                            for i in new_pairs:
+                                self.insert_log(f"🆕 Detected {new_pair}", "NOTIFICATION", "blue")
+                                text += f"\n-{i}"
+                            Thread(target=self.insert_status, args=(text, "NOTIFICATION")).start()
+                            for i in new_pairs:
+                                self.add_piars(cursor, i)
+                        # If ther is JUST ONE pair ==================================================
+                        # ============================================================================
+                        else:
+                            self.insert_log(f"🆕 Detected {new_pair}", "NOTIFICATION", "blue")
+                            self.buy_and_sell_pair(new_pair)
+                            text = f"🆕 Detected `{new_pair}`"
+                            Thread(target=self.insert_status, args=(text, "NOTIFICATION")).start()
+                            self.add_piars(cursor, new_pair)
                     else:
+                        for i in new_pairs:
+                            self.insert_log(f"🆕 Detected {i}", "NOTIFICATION", "blue")
+                            self.add_piars(cursor, i)
                         self.firt_time_run = False
-
+                        
                     text = f"🆕 Detected `{new_pair}`"
                     Thread(target=self.insert_status, args=(text, "NOTIFICATION")).start()
-                    Thread(target=self.add_piars, args=(cursor, new_pair)).start()
 
+                self.firt_time_run = False
                 self.platform_status_speed.config(text=f"Request in: {request_in:.4f}s",
                                                   fg="green" if request_in <= 1 else "orange")
                 self.platform_status.config(text="Platform Status: Success", fg="green")
@@ -189,7 +385,7 @@ class PlatformBot:
             except Exception as e:
                 self.platform_status.config(text="Platform Status: Error", fg="red")
                 self.platform_status_speed.config(text="Request in: Error !!", fg="red")
-                self.insert_log(f"Error> {e}", "ERROR", "red")
+                self.insert_log(f"{e}", "ERROR", "red")
                 text = f"There is an error: `{e}` in `infinity loop`"
                 Thread(target=self.insert_status, args=(text, "NOTIFICATION")).start()
                 self.restart_script()
@@ -203,9 +399,15 @@ class PlatformBot:
 # ===================================================================
 # Example: A Local account config ===================================
 class LocalBot(PlatformBot):
+
+    class PlatAccont(BitgetData):
+        API_SECRET = str(os.getenv("API_SECREAT"))
+        API_KEY = str(os.getenv("API_KEY"))
+        PASSPHRASE = str(os.getenv("API_PASS"))
+
     account = "Local"
     platform = "Bitget"
-    platform_data = BitgetData()
+    platform_data = PlatAccont()
     DB_NAME = "Local.db"
 
 def start_local():
