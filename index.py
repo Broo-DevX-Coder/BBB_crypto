@@ -12,7 +12,7 @@ TELEGRAM_BOT_TOKEN = "7900942260:AAHjdiCRobHwbkUj0PEMfcOqTHTvniMK_ck"
 TELEGRAM_account_CHAT_ID = 7634771616
 
 # Get .env file =====================================================
-load_dotenv(os.path.join(BASE_DIR,".env"))
+#load_dotenv(os.path.join(BASE_DIR,".env"))
 
 # ===================================================================
 # Class to fetch data from Bitget ===================================
