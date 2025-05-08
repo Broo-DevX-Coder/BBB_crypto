@@ -322,6 +322,7 @@ class PlatformBot:
         # Get trust ===========================
         while trust < 60 and ranged <3:
             trust_price,trust,ev = self.platform_data.trust_buy_price(symbol)
+            ranged += 1
 
         if ev == None:
             # get symbol info =========================
