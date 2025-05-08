@@ -94,19 +94,23 @@ class BitgetData:
         return base64.b64encode(signature).decode()
     
     # to place Buy/Sell orders ==========================
-    def place_order(self, symbol:str, side:str, amount:float, checkScale:int):
+    def place_order(self, symbol:str, side:str, order_type:str ,quantity:dict ,price:dict=None):
         try:
             url = "https://api.bitget.com/api/v2/spot/trade/place-order"
             method = "POST"
             timestamp = str(int(time.time() * 1000))
-            safe_amount = math.floor(amount * (10 ** checkScale)) / (10 ** checkScale)
+            safe_amount = math.floor(float(quantity["amount"]) * (10 ** float(quantity["checkScale"]))) / (10 ** float(quantity["checkScale"]))
 
             body = {
                     "symbol": symbol,      # مثل "BTCUSDT"
                     "side": side,          # "buy" أو "sell"
-                    "orderType": "market",
+                    "orderType": order_type,
                     "size": str(safe_amount)
                 }
+
+            if order_type == "limit":
+                safe_price = math.floor( float(price["price"]) * (10 ** float(price["checkScale"])) ) / (10 ** float(price["checkScale"]))
+                body.update({"force":"gtc","price":str(safe_price)})
 
             body_str = json.dumps(body)
             sign = self.generate_signature(timestamp, method, "/api/v2/spot/trade/place-order", body_str)
@@ -176,7 +180,40 @@ class BitgetData:
                 return None,response.text
         except requests.RequestException as e:
             return None,str(e)
-
+        
+    # Trust the price ============================================
+    def trust_buy_price(self,symbol): # -> weighted_price , trust , error
+        try:
+            url = f"https://api.bitget.com/api/v2/spot/market/orderbook?symbol={symbol}&limit=5"
+            response = self.session.get(url,timeout=3)
+            trust = 0
+            if response.status_code == 200:
+                response = response.json()
+                asks = response["data"]["asks"]
+                bids = response["data"]["bids"]
+                asks_prices = [float(ask[0]) for ask in asks]
+                asks_contitys = [float(ask[1]) for ask in asks]
+                bids_prices = [float(bid[0]) for bid in bids]
+                bids_contitys = [float(bid[1]) for bid in bids]
+                sellOne = asks_prices[0]
+                buyOne = bids_prices[0]
+                spread = sellOne - buyOne
+                weighted_price = sum(p*q for p,q in zip(asks_prices,asks_contitys)) / sum(asks_contitys)
+                price_testing = (sellOne - weighted_price) / weighted_price
+                if sum(asks_contitys) == 0:
+                    return None,None,"There is not any asks"
+                if price_testing <= 0.03:
+                    trust += 50
+                if spread <= 0.02:
+                    trust += 10
+                if sum(bids_contitys) >= 100:
+                    trust += 10
+                if sum(asks_contitys) >= 100:
+                    trust += 30
+                return [weighted_price,sellOne],trust,None
+        except requests.RequestException as e:
+            return None,None,e
+        
 
 # ===================================================================
 # Main Platform + GUI Controller ====================================
@@ -221,6 +258,9 @@ class PlatformBot:
         now = datetime.now().strftime("%m/%d %H:%M:%S")
         self.new_listbox.insert(0, f"[{log_type}: {now}] {msg}")
         self.new_listbox.itemconfig(0, {'fg': color})
+
+        with open(os.path.join(BASE_DIR, "logs.txt"), "a", encoding="utf-8") as f:
+            f.write(f"\n[{log_type}: {now}] {msg}")
 
     # Send a Telegram message =============
     def insert_status(self, msg: str, log_type: str):
@@ -275,54 +315,39 @@ class PlatformBot:
     # That is the main =========================================
     def buy_and_sell_pair(self, symbol:str):
         __ = datetime.now().timestamp()
-        # Buy symbol =======================
-        data_buying,error_buying = self.platform_data.place_order(symbol,"buy",2,4)
-        buy__ = datetime.now().timestamp() - __
-        
-        # If byed =========================
-        if error_buying == None:
-            if data_buying['msg'] == "success":
-                # byed by seccess ===================
-                self.insert_log(f"Buyed {symbol} in : {round(buy__*1000 , 0)} ms" , "NOTIFICATION", "#030303")
-                time.sleep(4)
 
-                # get pairs ========================
-                pairs,error_pairs = self.platform_data.get_balance()
+        trust = 0
+        ranged = 0
 
-                # if piars geted ===============
-                if error_pairs == None:
-                    wanted_assest = pairs.get(str(symbol.replace("USDT", "")))
+        # Get trust ===========================
+        while trust < 60 and ranged <3:
+            trust_price,trust,ev = self.platform_data.trust_buy_price(symbol)
 
-                    if wanted_assest:
-                        # get assest price ================
-                        pair_info, error_type, error_info = self.platform_data.get_pair_info(symbol)
-                        if error_type == None:
-                            data_selling,error_selling = self.platform_data.place_order(symbol,"sell",float(wanted_assest["amount"]),int(pair_info["quantityPrecision"]))
-                            if error_selling != None:
-                                self.insert_log(f"from selling system >> {error_selling}", "ERROR", "red")
-                                Thread(target=self.insert_status, args=(f"there is an error in selling system : `{error_selling}`", "ERROR")).start()
-                            else:
-                                self.insert_log(f"Selled {symbol} in : {round((datetime.now().timestamp() - __)*1000,0)} ms" , "NOTIFICATION", "#A5158C")
-                                pairs__,error_pairs__ = self.platform_data.get_balance()
-                                wanted_assest__ = pairs__.get("USDT")
-                                self.insert_log(f"your curent Balnce now is `{round(float(wanted_assest__["amount"]),2)}` USDT $$", "USERNOTIF", "#3D8D7A")
-                                Thread(target=self.insert_status, args=(f"your curent Balnce now is `{round(float(wanted_assest__["amount"]),2)}` USDT $$", "USERNOTIF")).start()
-                        else:
-                            self.insert_log(f"from get assest info [TYPE] >> {error_type}", "ERROR", "red")
-                            self.insert_log(f"from get assest info [INFO] >> {error_info}", "ERROR", "red")
-                            Thread(target=self.insert_status, args=(f"there is an error in get assest info [INFO]: `{error_info}`", "ERROR")).start()
-                    
+        if ev == None:
+            # get symbol info =========================
+            symbol_info,____,evv = self.platform_data.get_pair_info(symbol)
+            print("fine get symbole")
+            if evv == None:
+                buyed = False
+                if trust >= 80:
+                    # Buy symbol ==========================
+                    data_buying,error_buying = self.platform_data.place_order(symbol,"buy","limit",{"amount":2/trust_price[1],"checkScale":4},{"price": trust_price[0],"checkScale":symbol_info["pricePrecision"]})
+                    buyed = True
+                elif trust >= 60:
+                    # Buy symbol ==========================
+                    data_buying,error_buying = self.platform_data.place_order(symbol,"buy","limit",{"amount":2/trust_price[1],"checkScale":4},{"price": trust_price[0],"checkScale":symbol_info["pricePrecision"]})
+                    buyed = True
                 else:
-                    self.insert_log(f"from get assestes system >> {error_pairs}", "ERROR", "red")
-                    Thread(target=self.insert_status, args=(f"there is an error in get assestes: `{error_pairs}`", "ERROR")).start()
-            else:
-                self.insert_log(f"from bitget in buying >>{data_buying['msg']}", "ERROR", "red")
-                Thread(target=self.insert_status, args=(f"there is an error from bitget in buying: `{data_buying['msg']}`", "ERROR")).start()
+                    Thread(target=self.insert_status, args=(f"Not buyed {symbol} \n Not trusted price", "Error")).start()
+                    self.insert_log(f"Not buyed {symbol} --> Not trusted price", "NOTIFICATION", "red")
 
-        elif error_buying != None:
-            self.insert_log(f"from buying system >> {error_buying}", "ERROR", "red")
-            Thread(target=self.insert_status, args=(f"there is an error in buying system : `{error_buying}`", "ERROR")).start()
-
+                if buyed == True:
+                    if error_buying == None:
+                        Thread(target=self.insert_status, args=(f"Buyed {symbol} in {datetime.now().timestamp() - __}", "NOTIFICATION")).start()
+                        self.insert_log(f"Buyed {symbol} in {datetime.now().timestamp() - __}", "NOTIFICATION", "green")
+                    else:
+                        Thread(target=self.insert_status, args=(f"Not buyed {symbol} \n {error_buying}", "Error")).start()
+                        self.insert_log(f"Not buyed {symbol} --> {error_buying}", "ERROR", "red")
 
     def platform_crypto(self):
         # Main bot logic loop
