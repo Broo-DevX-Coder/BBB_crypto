@@ -332,7 +332,7 @@ class PlatformBot:
                 buyed = False
                 if trust >= 80:
                     # Buy symbol ==========================
-                    data_buying,error_buying = self.platform_data.place_order(symbol,"buy","limit",{"amount":2/trust_price[1],"checkScale":4},{"price": trust_price[0],"checkScale":symbol_info["pricePrecision"]})
+                    data_buying,error_buying = self.platform_data.place_order(symbol,"buy","limit",{"amount":2/trust_price[1],"checkScale":symbol_info["quantityPrecision"]},{"price": trust_price[0],"checkScale":symbol_info["pricePrecision"]})
                     buyed = True
                 elif trust >= 60:
                     # Buy symbol ==========================
