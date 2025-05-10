@@ -1,0 +1,4 @@
+
+[SYSTEM: 05/10 01:11:38] Start the bot
+[USER: 05/10 01:11:38] Selected Platform: Bitget
+[USER: 05/10 01:11:38] Account in use: Local
